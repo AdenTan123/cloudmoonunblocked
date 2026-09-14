@@ -666,7 +666,8 @@
           <div class="game-list">
             <div v-for="g in filteredGames" :key="g.id" class="game-item" @click="selectGame(g)" :class="{'opacity-50': g.status != 1}">
               <div class="relative">
-                <img :src="g.icon" onerror="this.src='https://cloudmoonapp.com/favicon.ico'" :class="{'grayscale': g.status != 1}">
+                <img v-if="g.icon" :src="g.icon" @error="g.icon=''" :class="{'grayscale': g.status != 1}" style="min-width:100px;width:100px;height:60px;object-fit:cover;border-radius:8px">
+<div v-else style="min-width:100px;width:100px;height:60px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;background:linear-gradient(135deg,#8b5cf6aa,#1e2831);color:#fff">{{ (g.title||'?').slice(0,2).toUpperCase() }}</div>
                 <span v-if="g.isHigh" class="absolute -top-1 -right-1 bg-yellow-500/80 text-yellow-900 text-[8px] font-black px-1.5 py-0.5 rounded">PRO</span>
               </div>
               <div class="flex flex-col justify-center">
