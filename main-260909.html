@@ -687,7 +687,8 @@
             </button>
             <div v-if="selectedGame && isPlaying" class="flex items-center gap-3 text-right">
               <h1 class="text-lg font-black text-white leading-tight truncate max-w-[180px]">{{selectedGame.title}}</h1>
-              <img :src="selectedGame.icon" class="w-10 h-10 flex-shrink-0 object-cover rounded-lg shadow-lg border border-white/10">
+              <img v-if="selectedGame && selectedGame.icon" :src="selectedGame.icon" @error="selectedGame.icon=''" class="w-full aspect-video object-cover rounded-2xl shadow-xl border border-white/10 mb-6">
+<div v-else-if="selectedGame" class="w-full aspect-video rounded-2xl shadow-xl border border-white/10 mb-6" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8b5cf6aa,#0f172a)"><span style="font-size:32px;font-weight:900;color:#ffffff99">{{ selectedGame.title }}</span></div>
             </div>
           </div>
           
