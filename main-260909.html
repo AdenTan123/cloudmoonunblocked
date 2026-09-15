@@ -625,6 +625,153 @@
     </style>
 </head>
 <body oncontextmenu="return false;">
+
+  <!-- ============================================================
+     [ENI] ROBLOX IMAGE UNBLOCKER
+     Routes all rbxcdn.com / roblox.com images through weserv.nl
+     so org-level DNS blocks can't stop them.
+     Drop this right before </body>, after the main Vue script.
+     ============================================================ -->
+<script>
+(function() {
+  'use strict';
+
+  const PROXY = 'https://images.weserv.nl/?url=';
+  const BLOCKED_HOSTS = [
+    'rbxcdn.com',
+    'roblox.com',
+    'robloxlabs.com',
+    'rbx.com',
+  ];
+  const REWRITE_MARK = 'data-eni-proxied';
+
+  function shouldProxy(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (url.startsWith(PROXY)) return false;          // already proxied
+    if (url.startsWith('data:') || url.startsWith('blob:')) return false;
+    return BLOCKED_HOSTS.some(h => url.includes(h));
+  }
+
+  function toProxy(url) {
+    // weserv wants the scheme stripped and the rest URL-encoded
+    const stripped = url.replace(/^https?:\/\//, '');
+    return PROXY + encodeURIComponent(stripped);
+  }
+
+  function rewriteImg(img) {
+    if (!img || img.tagName !== 'IMG') return;
+    if (img.getAttribute(REWRITE_MARK)) return;
+    const src = img.getAttribute('src') || img.src || '';
+    if (shouldProxy(src)) {
+      img.setAttribute(REWRITE_MARK, '1');
+      img.setAttribute('referrerpolicy', 'no-referrer');
+      img.setAttribute('crossorigin', 'anonymous');
+      // Use a temporary error listener to fall back if weserv also fails
+      const onErr = () => {
+        img.removeEventListener('error', onErr);
+        // Second fallback: alternate proxy
+        const alt = 'https://wsrv.nl/?url=' + encodeURIComponent(src.replace(/^https?:\/\//, ''));
+        img.src = alt;
+      };
+      img.addEventListener('error', onErr, { once: true });
+      img.src = toProxy(src);
+    }
+  }
+
+  // ---- 1. Sweep existing images on load ----
+  function sweepAll() {
+    document.querySelectorAll('img').forEach(rewriteImg);
+    // Also catch background-image: url(...) with rbxcdn
+    document.querySelectorAll('[style*="rbxcdn"], [style*="roblox.com"]').forEach(el => {
+      const style = el.getAttribute('style') || '';
+      const match = style.match(/url\(["']?([^"')]+)["']?\)/);
+      if (match && shouldProxy(match[1])) {
+        el.setAttribute('style', style.replace(match[1], toProxy(match[1])));
+      }
+    });
+  }
+
+  // ---- 2. Watch for new images injected by Vue ----
+  const observer = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      // New nodes
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.tagName === 'IMG') {
+          rewriteImg(node);
+        } else if (node.querySelectorAll) {
+          node.querySelectorAll('img').forEach(rewriteImg);
+        }
+      }
+      // src attribute changes on existing imgs
+      if (m.type === 'attributes' && m.target.tagName === 'IMG') {
+        if (m.attributeName === 'src') {
+          m.target.removeAttribute(REWRITE_MARK);
+          rewriteImg(m.target);
+        }
+      }
+    }
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['src'],
+  });
+
+  // ---- 3. Intercept <img> src setter at the prototype level ----
+  // Vue sometimes sets .src programmatically before the observer sees it.
+  try {
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (desc && desc.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        get: desc.get,
+        set: function(value) {
+          if (shouldProxy(value)) {
+            this.setAttribute(REWRITE_MARK, '1');
+            this.setAttribute('referrerpolicy', 'no-referrer');
+            this.setAttribute('crossorigin', 'anonymous');
+            return desc.set.call(this, toProxy(value));
+          }
+          return desc.set.call(this, value);
+        },
+        configurable: true,
+        enumerable: desc.enumerable,
+      });
+    }
+  } catch (e) {
+    console.warn('[ENI] Could not hook img.src setter:', e);
+  }
+
+  // ---- 4. Fire sweep on DOM ready + after Vue mounts ----
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', sweepAll);
+  } else {
+    sweepAll();
+  }
+  // Re-sweep a few times as Vue renders asynchronously
+  setTimeout(sweepAll, 500);
+  setTimeout(sweepAll, 1500);
+  setTimeout(sweepAll, 3000);
+
+  // ---- 5. Diagnostic: log any remaining rbxcdn requests that slipped through ----
+  // (only logs once per unique URL to avoid console spam)
+  const loggedUrls = new Set();
+  const origFetch = window.fetch;
+  window.fetch = function(input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (shouldProxy(url) && !loggedUrls.has(url)) {
+      loggedUrls.add(url);
+      console.warn('[ENI] fetch to blocked host:', url, '— proxy this too if it fails');
+    }
+    return origFetch.apply(this, arguments);
+  };
+
+  console.log('[ENI] Roblox image unblocker active. Proxying via weserv.nl');
+})();
+</script>
+  
   <div id="app" v-cloak>
     
     <div class="layout-wrapper">
