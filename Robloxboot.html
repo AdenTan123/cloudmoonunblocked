@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>CloudMoon Direct Boot — Roblox</title>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@2.4.0/dist/socket.io.js"></script>
+<style>
+  :root { --bg:#0f172a; --fg:#e2e8f0; --accent:#8b5cf6; --err:#ef4444; --ok:#10b981; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif;
+         margin: 0; padding: 20px; min-height: 100vh; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .panel { max-width: 480px; margin: 40px auto; background: #1e293b; padding: 24px;
+           border-radius: 16px; border: 1px solid #334155; }
+  input, select { width: 100%; padding: 12px; margin: 8px 0; background: #0f172a;
+                  border: 1px solid #334155; color: var(--fg); border-radius: 10px;
+                  font-size: 14px; }
+  button { width: 100%; padding: 14px; margin-top: 12px; background: var(--accent);
+           color: white; font-weight: bold; border: none; border-radius: 10px;
+           font-size: 16px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #log { margin-top: 20px; font-family: monospace; font-size: 12px;
+         background: #000; padding: 12px; border-radius: 8px; max-height: 240px;
+         overflow-y: auto; color: #94a3b8; white-space: pre-wrap; }
+  #video-wrap { margin-top: 20px; display: none; }
+  video { width: 100%; border-radius: 12px; background: #000; }
+  .err { color: var(--err); }
+  .ok { color: var(--ok); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="panel" id="login-panel">
+  <h1>CloudMoon Direct Boot</h1>
+  <p style="font-size:12px;color:#94a3b8;margin:0 0 16px">
+    Skips the game list. Logs in, queues Roblox directly, streams.
+  </p>
+  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+  <select id="region">
+    <option value="21">South America</option>
+    <option value="22">US West</option>
+    <option value="23" selected>US East</option>
+    <option value="3">Asia</option>
+    <option value="4">Europe</option>
+  </select>
+  <input id="gamepkg" type="text" placeholder="Game package" value="com.roblox.client">
+  <button id="boot">Boot Session</button>
+  <div id="log"></div>
+</div>
+
+<div class="panel hidden" id="stream-panel">
+  <h1>Streaming Roblox</h1>
+  <div id="status" style="font-size:12px;color:#94a3b8"></div>
+  <div id="video-wrap">
+    <video id="remote-video" autoplay muted playsinline></video>
+    <audio id="remote-audio" autoplay muted></audio>
+    <button id="disconnect" style="margin-top:12px">Disconnect</button>
+  </div>
+  <div id="log2" style="margin-top:20px;font-family:monospace;font-size:12px;
+       background:#000;padding:12px;border-radius:8px;max-height:240px;
+       overflow-y:auto;color:#94a3b8;white-space:pre-wrap;"></div>
+</div>
+
+<script>
+// ============================================================
+// [ENI] CloudMoon Direct Boot
+// Bypasses game list + detail panel. Goes straight to session.
+// ============================================================
+
+const API_CANDIDATES = [
+  'https://api.cloudmoonapp.com',
+  'https://api1.cloudmoonapp.com',
+  'https://api2.cloudmoonapp.com',
+  'https://api.cloudmoon.gg',
+];
+const BACKUP_API = ['https://api-bk.cloudmoonapp.com', 'https://api-backup.cloudmoonapp.com'];
+
+const $ = id => document.getElementById(id);
+const log = (msg, cls) => {
+  const el = $('log') || $('log2');
+  if (!el) { console.log(msg); return; }
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+  console.log(msg);
+};
+
+let apiHost = null;
+let token = localStorage.getItem('cm_token') || '';
+let userId = localStorage.getItem('cm_userid') || '';
+let email = localStorage.getItem('cm_email') || '';
+
+// ============================================================
+// STEP 1: Find a working API host
+// ============================================================
+async function probeApi() {
+  for (const host of [...API_CANDIDATES, ...BACKUP_API]) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 2500);
+      const r = await fetch(host + '/health', { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) {
+        log(`API reachable: ${host}`, 'ok');
+        return host;
+      }
+    } catch (e) {
+      log(`API unreachable: ${host}`);
+    }
+  }
+  return null;
+}
+
+// ============================================================
+// STEP 2: Login (if no cached token)
+// ============================================================
+async function login(email, password) {
+  log('Logging in...');
+  const r = await fetch(apiHost + '/api/v2/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Language': 'en',
+      'X-Api-Locale': 'us',
+      'X-Cm-Client': 'web',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await r.json();
+  if (data.code !== 0 || !data.data?.token) {
+    throw new Error(data.msg || 'Login failed');
+  }
+  token = data.data.token;
+  userId = data.data.user_id || '';
+  localStorage.setItem('cm_token', token);
+  localStorage.setItem('cm_userid', userId);
+  localStorage.setItem('cm_email', email);
+  log('Logged in.', 'ok');
+  return data.data;
+}
+
+// ============================================================
+// STEP 3: Get device fingerprint (android_id)
+// ============================================================
+async function getAccount() {
+  log('Fetching account/device info...');
+  const r = await fetch(apiHost + '/api/v2/game/account', {
+    headers: {
+      'X-User-Token': token,
+      'X-Api-Language': 'en',
+      'X-Api-Locale': 'us',
+      'X-Cm-Client': 'web',
+    },
+  });
+  const data = await r.json();
+  if (data.code !== 0) throw new Error(data.msg || 'Account fetch failed');
+  const devices = data.data?.android_devices || data.data?.devices || [];
+  if (!devices.length) throw new Error('No android devices on account');
+  const device = devices[0];
+  log(`Device: ${device.android_id || device.id}`, 'ok');
+  return device;
+}
+
+// ============================================================
+// STEP 4: Queue the game (this is what creates the session)
+// ============================================================
+async function queueGame(androidId, gameName, serverId) {
+  log(`Queuing ${gameName} on server ${serverId}...`);
+  const r = await fetch(apiHost + '/api/v2/game/queue', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Token': token,
+      'X-Api-Language': 'en',
+      'X-Api-Locale': 'us',
+      'X-Cm-Client': 'web',
+    },
+    body: JSON.stringify({
+      android_id: androidId,
+      game_name: gameName,
+      screen_res: '1280x720',
+      server_id: parseInt(serverId),
+      params: JSON.stringify({ language: 'en', locale: 'us' }),
+      ad_unblock: false,
+    }),
+  });
+  const data = await r.json();
+  if (data.code !== 0) throw new Error(data.msg || 'Queue failed');
+  if (data.data?.position) {
+    throw new Error(`Queued — position ${data.data.position}. Try again in a moment.`);
+  }
+  log(`Session created: sid=${data.data.sid}`, 'ok');
+  return data.data;
+}
+
+// ============================================================
+// STEP 5: Connect to the session coordinator and negotiate WebRTC
+// ============================================================
+function connectSession(session) {
+  const { sid, coordinator_url, coordinator_tunnel, android_instance_id } = session;
+  const url = coordinator_url || coordinator_tunnel;
+  if (!url) throw new Error('No coordinator URL in session');
+  log(`Connecting WebRTC to ${url}`);
+
+  const socket = io(url, {
+    reconnection: false,
+    path: '/socket.io',
+    transports: ['websocket'],
+  });
+
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:stun.l.google.com:19302' },
+    ],
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+    iceCandidatePoolSize: 10,
+  });
+
+  const dc = pc.createDataChannel('data', { ordered: true });
+  dc.onopen = () => {
+    log('Data channel open', 'ok');
+    socket.emit('message', JSON.stringify({ action: 'ready' }));
+  };
+  dc.onmessage = e => {
+    const msg = e.data;
+    if (typeof msg === 'string' && msg.startsWith('video>')) {
+      const parts = msg.split('>')[1].split(',');
+      const orientation = parseInt(parts[1]);
+      log(`Game view orientation: ${orientation}`);
+    }
+  };
+
+  pc.ontrack = ev => {
+    log(`Got remote track: ${ev.track.kind}`, 'ok');
+    const stream = ev.streams[0];
+    if (ev.track.kind === 'video') {
+      const v = $('remote-video');
+      v.srcObject = stream;
+      v.play().catch(err => log('Video play error: ' + err.message));
+      $('video-wrap').style.display = 'block';
+    } else if (ev.track.kind === 'audio') {
+      $('remote-audio').srcObject = stream;
+    }
+  };
+
+  pc.onicecandidate = ev => {
+    if (ev.candidate) {
+      socket.emit('message', JSON.stringify({
+        type: 'candidate',
+        candidate: ev.candidate.candidate,
+        sdpMLineIndex: ev.candidate.sdpMLineIndex,
+        sdpMid: ev.candidate.sdpMid,
+      }));
+    }
+  };
+
+  socket.on('connect', () => {
+    log('WebSocket connected', 'ok');
+    socket.emit('message', JSON.stringify({ action: 'join', roomid: sid, clientid: 'eni-web' }));
+  });
+
+  socket.on('message', async raw => {
+    let msg;
+    try { msg = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+    catch { return; }
+    if (msg.type === 'offer') {
+      log('Got SDP offer');
+      await pc.setRemoteDescription(new RTCSessionDescription(msg));
+      const answer = await pc.createAnswer();
+      // Inject RRTR for low latency (CloudMoon expects this)
+      answer.sdp = answer.sdp
+        .replace(/(m=video.*\r\n)/, '$1a=rtcp-fb:* nack pli\r\n')
+        .replace(/(m=audio.*\r\n)/, '$1a=rtcp-fb:* nack pli\r\n');
+      await pc.setLocalDescription(answer);
+      socket.emit('message', JSON.stringify({
+        type: 'answer',
+        sdp: answer.sdp,
+      }));
+      log('Sent SDP answer');
+    } else if (msg.type === 'candidate') {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate({
+          sdpMLineIndex: msg.sdpMLineIndex,
+          candidate: msg.candidate,
+        }));
+      } catch (e) { /* candidate may arrive before remote desc */ }
+    } else if (msg.type === 'close' || msg.data === 'close') {
+      log('Coordinator closed the session', 'err');
+      disconnectAll();
+    }
+  });
+
+  socket.on('connect_error', e => log('Socket error: ' + e.message, 'err'));
+  socket.on('disconnect', () => log('Socket disconnected', 'err'));
+
+  // Expose for disconnect button
+  window.__cm_pc = pc;
+  window.__cm_socket = socket;
+  return { pc, socket };
+}
+
+// ============================================================
+// MAIN BOOT
+// ============================================================
+async function boot() {
+  $('boot').disabled = true;
+  try {
+    const emailVal = $('email').value.trim();
+    const passVal = $('password').value;
+    const region = $('region').value;
+    const gamePkg = $('gamepkg').value.trim() || 'com.roblox.client';
+
+    // 1. Find API
+    apiHost = await probeApi();
+    if (!apiHost) throw new Error('No CloudMoon API reachable');
+
+    // 2. Login (or reuse token)
+    if (!token) {
+      if (!emailVal || !passVal) throw new Error('Email and password required');
+      await login(emailVal, passVal);
+    } else {
+      log('Reusing cached token. Log out first to change accounts.');
+    }
+
+    // 3. Get device
+    const device = await getAccount();
+    const androidId = device.android_id || device.id;
+
+    // 4. Create session
+    const session = await queueGame(androidId, gamePkg, region);
+
+    // 5. Switch to stream panel
+    $('login-panel').classList.add('hidden');
+    $('stream-panel').classList.remove('hidden');
+    $('status').textContent = `Session ${session.sid} | ${gamePkg}`;
+
+    // 6. Connect WebRTC
+    connectSession(session);
+
+  } catch (err) {
+    log(err.message, 'err');
+    $('boot').disabled = false;
+  }
+}
+
+function disconnectAll() {
+  try { window.__cm_socket?.disconnect(); } catch {}
+  try { window.__cm_pc?.close(); } catch {}
+  window.__cm_pc = null;
+  window.__cm_socket = null;
+  $('stream-panel').classList.add('hidden');
+  $('login-panel').classList.remove('hidden');
+  $('boot').disabled = false;
+  $('video-wrap').style.display = 'none';
+}
+
+// ============================================================
+// WIRE IT UP
+// ============================================================
+$('boot').addEventListener('click', boot);
+$('disconnect').addEventListener('click', disconnectAll);
+
+// Pre-fill from localStorage
+if (email) $('email').value = email;
+if (token) log('Cached token found — click Boot to reuse.', 'ok');
+
+// Prevent context menu (matches original)
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+log('Ready. Click Boot Session to start.');
+</script>
+
+</body>
+</html>
