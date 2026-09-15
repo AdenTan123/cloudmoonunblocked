@@ -1,10 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="position: fixed; top: 0; left: 0;"> <foreignObject x="0" y="0" width="100%" height="100%"> <body xmlns="http://www.w3.org/1999/xhtml"> <meta content='width=device-width, initial-scale=1.0' name='viewport'></meta> <iframe style="position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%; border:none; margin:0; padding:0; overflow:hidden; z-index:999999;" id="cmFrame"></iframe> <script> // ============================================================ // [ENI] CloudMoon SVG launcher // Wraps the boot page in a full-screen iframe so you can // host it as a .svg and open it from anywhere. // ============================================================ (function() { const params = new URLSearchParams(window.location.search); params.set('t', Date.now()); // cache-bust
-const TARGET = "https://cdn.jsdelivr.net/gh/AdenTan123/cloudmoonunblocked@main/15092026.html";
-const url = TARGET + "?" + params.toString();
-
-const frame = document.getElementById('cmFrame');
-frame.src = url;
-})();
-</script>
-
-</body> </foreignObject></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="position: fixed; top: 0; left: 0;">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <body xmlns="http://www.w3.org/1999/xhtml">
+      <meta content='width=device-width, initial-scale=1.0' name='viewport'></meta>
+      <iframe style="position:fixed; top:0; left:0; width:100%; height:100%; border:none; z-index:999999;" id="cmFrame"></iframe>
+      <script>
+        const params = new URLSearchParams(window.location.search);
+        params.set("t", Date.now());
+        document.getElementById('cmFrame').src =
+          "https://cdn.jsdelivr.net/gh/AdenTan123/cloudmoonunblocked@main/15092026.html?" + params.toString();
+      </script>
+    </body>
+  </foreignObject>
+</svg>
